@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bouncy Balls Classroom</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; color: white; font-family: sans-serif; }
+        #start-btn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 15px 30px; font-size: 20px; cursor: pointer; z-index: 10; border-radius: 10px; background-color: #4CAF50; color: white; border: none; }
+        #status { position: absolute; top: 20px; left: 20px; font-size: 24px; font-weight: bold; z-index: 10; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <button id="start-btn">Attiva Microfono</button>
+    <div id="status">Livello rumore: 0</div>
+    
+    <!-- Libreria per la fisica delle palline -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+
+    <script>
+        // INCOLLA QUI TRA LE VIRGOLETTE L'URL CHE TI HA DATO GOOGLE APPS SCRIPT
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwP4TTjXGhsI9kEg4HIsj_nTELbxdhzOGUpDFAUVjpxX1nJ5T1QYKdcQhIniagVYW0/exec";
+        
+        const LIMITE_RUMORE = 80; // Se gridate troppo, cambia questo numero!
+        let messaggioInviato = false; 
+        let palline = [];
+
+        document.getElementById('start-btn').addEventListener('click', async function() {
+            this.style.display = 'none'; 
+            inizializzaFisica(); // Fa apparire le palline
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const analyser = audioContext.createAnalyser();
+                const microphone = audioContext.createMediaStreamSource(stream);
+                
+                analyser.smoothingTimeConstant = 0.8;
+                analyser.fftSize = 1024;
+                microphone.connect(analyser);
+                
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                
+                function rilevaRumore() {
+                    analyser.getByteFrequencyData(dataArray);
+                    
+                    let somma = 0;
+                    for(let i = 0; i < dataArray.length; i++) {
+                        somma += dataArray[i];
+                    }
+                    let volume = somma / dataArray.length;
+                    
+                    document.getElementById('status').innerText = "Livello rumore: " + Math.round(volume);
+                    
+                    // Se c'è rumore, fai saltare le palline
+                    if (volume > 15) {
+                        applicaForzaAllePalline(volume);
+                    }
+                    
+                    // Se si supera il limite e non è stato già inviato, manda su Classroom
+                    if (volume > LIMITE_RUMORE && !messaggioInviato) {
+                        inviaAvvisoClassroom();
+                    }
+                    
+                    requestAnimationFrame(rilevaRumore);
+                }
+                
+                rilevaRumore();
+                
+            } catch (err) {
+                alert("Errore microfono: Per favore consenti l'uso del microfono!");
+            }
+        });
+
+        function inviaAvvisoClassroom() {
+            if (WEB_APP_URL === "INSERISCI_QUI_L_URL_DI_GOOGLE_APPS_SCRIPT") {
+                alert("Non hai inserito l'URL di Google Apps Script nel codice!");
+                return;
+            }
+
+            messaggioInviato = true;
+            document.getElementById('status').innerText = "AVVISO INVIATO A CLASSROOM!";
+            document.getElementById('status').style.color = "red";
+            
+            fetch(WEB_APP_URL, { method: 'POST', mode: 'no-cors' })
+            .then(() => {
+                // Aspetta 60 secondi prima di poter inviare un altro avviso
+                setTimeout(() => { 
+                    messaggioInviato = false; 
+                    document.getElementById('status').style.color = "white";
+                }, 60000); 
+            });
+        }
+
+        function inizializzaFisica() {
+            const Engine = Matter.Engine, Render = Matter.Render, Runner = Matter.Runner, Bodies = Matter.Bodies, Composite = Matter.Composite;
+            const engine = Engine.create();
+            
+            const render = Render.create({
+                element: document.body,
+                engine: engine,
+                options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#222' }
+            });
+
+            // Crea il pavimento e i muri invisibili
+            const pavimento = Bodies.rectangle(window.innerWidth / 2, window.innerHeight + 25, window.innerWidth, 50, { isStatic: true });
+            const muroSx = Bodies.rectangle(-25, window.innerHeight / 2, 50, window.innerHeight, { isStatic: true });
+            const muroDx = Bodies.rectangle(window.innerWidth + 25, window.innerHeight / 2, 50, window.innerHeight, { isStatic: true });
+            const soffitto = Bodies.rectangle(window.innerWidth / 2, -25, window.innerWidth, 50, { isStatic: true });
+
+            // Crea 30 palline colorate
+            const colori = ['#FF5733', '#33FF57', '#3357FF', '#F3FF33', '#FF33F3', '#33FFF3'];
+            for (let i = 0; i < 30; i++) {
+                const raggio = Math.random() * 20 + 15;
+                const pallina = Bodies.circle(Math.random() * window.innerWidth, Math.random() * (window.innerHeight / 2), raggio, {
+                    restitution: 0.9, // Rimbalzo
+                    render: { fillStyle: colori[Math.floor(Math.random() * colori.length)] }
+                });
+                palline.push(pallina);
+            }
+
+            Composite.add(engine.world, [pavimento, muroSx, muroDx, soffitto, ...palline]);
+            Render.run(render);
+            Runner.run(Runner.create(), engine);
+        }
+
+        function applicaForzaAllePalline(volume) {
+            // Applica una forza verso l'alto alle palline in base al volume
+            palline.forEach(pallina => {
+                const forza = (volume / 100) * 0.03; // Calcola quanto farle saltare
+                Matter.Body.applyForce(pallina, pallina.position, { x: (Math.random() - 0.5) * 0.02, y: -forza });
+            });
+        }
+    </script>
+</body>
+</html>
